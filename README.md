@@ -85,7 +85,7 @@ Open `arduino/raw_imu_recorder/Raw_IMU_Recorder.ino`, upload, and read the Seria
 
 ## Hardware
 
-- **Arduino Nano 33 BLE Sense** (Nordic nRF52840, 256 KB flash, 64 KB RAM, onboard IMU)
+- **Arduino Nano 33 BLE Sense** (Nordic nRF52840, 1 MB flash, 256 KB RAM, onboard IMU)
 
 ---
 
@@ -98,3 +98,9 @@ Per the lab's discussion questions: predictions on live hardware can be unstable
 ## Authors
 
 Sparsh Dadhich — University of Washington, ECE / Neuroscience
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE). This covers the author's own code, notebooks, and documentation in this repo.
