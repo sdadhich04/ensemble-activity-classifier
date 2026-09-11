@@ -1,106 +1,47 @@
-# Ensemble Activity Classifier — Arduino Nano 33 BLE Sense
+# Ensemble Activity Classifier
 
-**EE 446: Tiny Machine Learning for Ultra Low-Power Edge Computing | University of Washington, Spring 2026**
+EE 446 Lab 8 code for classifying human activity from IMU data with a stacked ensemble. The repository includes a notebook that trains and exports the models, an Arduino inference sketch, the four deployed int8 model arrays, and one `mHealth_subject6.log` input file.
 
-A tiny ensemble-learning pipeline for IMU-based human activity classification, trained on the mHealth dataset and compressed for deployment on a microcontroller.
+## Dataset and inputs
 
----
+The notebook reads `mHealth_subject6.log`. It keeps rows whose activity-label column is greater than zero, uses columns 5–10 as three accelerometer and three gyroscope features, and changes the 1-based labels to 0-based labels. The 12 labels used by the sketch are: standing still, sitting and relaxing, lying down, walking, climbing stairs, waist bends forward, frontal elevation of arms, knees bending (crouching), cycling, jogging, running, and jump front and back.
 
-## What it does
+Inputs are 100 samples by six features, flattened to 600 values. The Arduino sketch samples at 50 Hz, so it collects one such window in about two seconds.
 
-Classifies human activity (standing, sitting, lying down, walking, and other mHealth-labeled activities — 12 classes total) from a 100-sample × 6-feature IMU window (3-axis accelerometer + 3-axis gyroscope).
+## Ensemble
 
-Three parallel branches process the same input window under different preprocessing strategies — raw, standard-scaled, and min-max-scaled — each with its own autoencoder (600 → 64 → 32) feeding a small classifier (32 → 20 → 12). The three 12-class softmax outputs are concatenated into a 36-dimensional vector and passed into a stacked meta-classifier (36 → 24 → 12) that produces the final prediction. Seven trained models work together: 3 encoders, 3 branch classifiers, 1 meta-classifier.
+The same window is sent through three preprocessing branches: raw, standard-scaled, and min-max-scaled. Each branch has a 600 → 64 → 32 encoder and a 32 → 20 → 12 softmax classifier. The three 12-value outputs are concatenated into a 36-value vector for a 36 → 24 → 12 softmax stacked meta-classifier. For deployment, the sketch loads three combined encoder-classifier int8 models plus the int8 meta-classifier from `arduino/tiny_ensemble_learning/`.
 
----
+The notebook applies pruning, quantization-aware training, and int8 TFLite conversion to the three combined branch models and the meta-classifier.
 
-## Model compression
+## Hardware and tools
 
-Each deployed model is compressed via:
+The inference sketch uses `Arduino_BMI270_BMM150` and its comments identify the target IMU as the Arduino Nano 33 BLE Sense Rev2. It also includes TensorFlow Lite Micro headers through the Arduino `TensorFlowLite` library.
 
-1. **Magnitude-based pruning** — TensorFlow Model Optimization's PolynomialDecay schedule, sparsity ramped 10% → 80% over 500 steps
-2. **Pruning-wrapper stripping** — `strip_pruning()` removes mask/bookkeeping overhead while preserving the sparse structure
-3. **Quantization-aware training (QAT)** — simulates int8 arithmetic during training; a custom `MaskEnforcerCallback` keeps pruned weights at exactly zero throughout QAT (a plain prune-then-QAT pipeline lets fine-tuning silently un-prune those weights)
-4. **Full int8 TFLite conversion** — calibrated with a representative dataset for accurate activation ranges
+The notebook imports NumPy, pandas, Matplotlib, TensorFlow, TensorFlow Model Optimization, and scikit-learn.
 
----
+## Run
 
-## Repository contents
+### Train and export with the notebook
 
-```
-TinyML_Lab8_Part_II.ipynb           ← Full pipeline: load mHealth data → train 3 branches → ensemble → prune/QAT/quantize
-Lab8_EE446_Report.pdf               ← Written report (architecture, compression methodology, deployment analysis)
-data/
-  mHealth_subject6.log              ← mHealth Subject 6 raw sensor log (accel + gyro + activity label, 18 MB)
-models/
-  encoder_raw.tflite, encoder_std.tflite, encoder_minmax.tflite       ← Unpruned encoders (float)
-  clf_raw.tflite, clf_std.tflite, clf_minmax.tflite                  ← Unpruned branch classifiers (float)
-  stacked_meta_clf.tflite                                            ← Unpruned meta-classifier (float)
-  encoder_clf_*_pruned_qat_int8.tflite / .cc                         ← Pruned + QAT + int8 branch models (deployed)
-  stacked_meta_clf_pruned_qat_int8.tflite / .cc                      ← Pruned + QAT + int8 meta-classifier (deployed)
-arduino/
-  raw_imu_recorder/                 ← Sketch to record IMU data over Serial for building your own dataset
-  tiny_ensemble_learning/           ← Inference sketch — loads all 4 compressed .cc models, runs the full ensemble
-firmware/                           ← Pre-built firmware binary + flash scripts (flash without Arduino IDE)
-```
+The notebook expects the mHealth log in the repository root. In PowerShell:
 
----
-
-## Quick start
-
-### Run the notebook (train / reproduce)
-
-```bash
-pip install numpy pandas tensorflow tensorflow-model-optimization scikit-learn matplotlib
+```powershell
+Copy-Item data\mHealth_subject6.log .\mHealth_subject6.log
+pip install numpy pandas matplotlib tensorflow tensorflow-model-optimization scikit-learn
 jupyter notebook TinyML_Lab8_Part_II.ipynb
 ```
 
-The notebook expects `mHealth_subject6.log` in the same folder as itself — copy it in from `data/` before running, or point the notebook's data path at `data/mHealth_subject6.log`.
+Run the notebook cells in order. Its optional final validation section only runs when `imu_500_rows.csv` is present in the repository root.
 
-### Flash the Arduino sketch (inference)
+### Run inference on the board
 
-1. Install the `TensorFlowLite` and `Arduino_BMI270_BMM150` libraries via Arduino Library Manager
-2. Open `arduino/tiny_ensemble_learning/Tiny_Ensemble_Learning.ino` in Arduino IDE — the 4 `.cc` model files are already alongside it and load automatically
-3. Upload to Nano 33 BLE Sense, open Serial Monitor at the sketch's configured baud rate
-4. Place the board flat on a stable surface to observe steady-state predictions, then move it to see activity labels change
+1. Install the Arduino `TensorFlowLite` and `Arduino_BMI270_BMM150` libraries.
+2. Open `arduino/tiny_ensemble_learning/Tiny_Ensemble_Learning.ino` in Arduino IDE. The four required `.cc` model files are in the same sketch folder.
+3. Upload the sketch and open Serial Monitor at 115200 baud. The sketch prints a prediction after each 100-sample window.
 
-### Flash pre-built firmware (no Arduino IDE)
+`arduino/raw_imu_recorder/Raw_IMU_Recorder.ino` is a separate recorder sketch. It prints timestamped accelerometer and gyroscope readings to Serial at 50 Hz for two minutes.
 
-```bash
-# Windows
-firmware\flash_windows.bat
+## Credits
 
-# Mac
-firmware/flash_mac.command
-
-# Linux
-bash firmware/flash_linux.sh
-```
-
-### Collect your own IMU data
-
-Open `arduino/raw_imu_recorder/Raw_IMU_Recorder.ino`, upload, and read the Serial output to capture your own 6-axis IMU recordings in the same format as `mHealth_subject6.log`.
-
----
-
-## Hardware
-
-- **Arduino Nano 33 BLE Sense** (Nordic nRF52840, 1 MB flash, 256 KB RAM, onboard IMU)
-
----
-
-## Known deployment caveats
-
-Per the lab's discussion questions: predictions on live hardware can be unstable or biased toward a single class relative to the mHealth training distribution, due to differences between the original dataset's sensor placement/orientation and the Arduino's onboard IMU axes, plus scaling mismatches between offline training data and live sensor readings. See `Lab8_EE446_Report.pdf` for the full analysis.
-
----
-
-## Authors
-
-Sparsh Dadhich — University of Washington, ECE / Neuroscience
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE). This covers the author's own code, notebooks, and documentation in this repo.
+EE 446 Lab 8 repository authored by Sparsh Dadhich. Licensed under the MIT License; see [LICENSE](LICENSE).
